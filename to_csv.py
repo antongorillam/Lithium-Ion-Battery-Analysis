@@ -88,8 +88,9 @@ def create_features(unprocessed_df: pd.DataFrame, rul: int) -> pd.DataFrame:
     eol_row = unprocessed_df.query('gt==True').iloc[
         (unprocessed_df.query('gt==True')['soh'] - rul).abs().argsort()[:1]]
 
-    eol_cycle = eol_row.cycle.values[0]
-    unprocessed_df['rul'] = unprocessed_df.cycle.apply(lambda x: eol_cycle - x)
+    eol_endTime = eol_row.endTime.values[0]
+    unprocessed_df['rul'] = unprocessed_df.endTime.apply(lambda x: eol_endTime - x)
+    
 
     # Add daily average temperature
     mean_df = unprocessed_df.groupby(['date'])[['avgTemperature']].mean().reset_index()
