@@ -10,6 +10,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument('-p','--paths', nargs='+', help='Paths to the .m files to be converted', required=True, type=str)
 parser.add_argument('--save_path', help='The folder to save the processed .csv file', default=None, type=str)
 parser.add_argument('--file_name', help='The file name of the new .csv file', default=None, type=str)
+parser.add_argument('--rul', help='The SoH where we deem the end-of-life of the battery (0-100)', default=None, type=int) # Refractor this
 
 def create_df(paths: List[str]) -> pd.DataFrame:
     """
@@ -38,7 +39,7 @@ def create_df(paths: List[str]) -> pd.DataFrame:
 
     return pd.concat(dfs, ignore_index=True)
 
-def create_features(unprocessed_df: pd.DataFrame) -> pd.DataFrame:
+def create_features(unprocessed_df: pd.DataFrame, rul: int) -> pd.DataFrame:
     """
     This function takes an unprocessed DataFrame and returns a processed DataFrame with additional features.
     
@@ -77,6 +78,16 @@ def create_features(unprocessed_df: pd.DataFrame) -> pd.DataFrame:
     unprocessed_df['endTime'] = unprocessed_df['time'].apply(lambda x: x[-1]) / 3600
     unprocessed_df['cycle'] = unprocessed_df.index
 
+    # Compute SoH
+    unprocessed_df['soh'] = unprocessed_df['capacity (Ah)'] / unprocessed_df['capacity (Ah)'].dropna().iloc[0] * 100 # Compute the SoH
+
+    # Compute RUL
+    eol_row = unprocessed_df.query('gt==True').iloc[
+        (unprocessed_df.query('gt==True')['soh'] - rul).abs().argsort()[:1]]
+
+    eol_cycle = eol_row.cycle.values[0]
+    unprocessed_df['rul'] = unprocessed_df.cycle.apply(lambda x: eol_cycle - x)
+
     # Add daily average temperature
     mean_df = unprocessed_df.groupby(['date'])[['avgTemperature']].mean().reset_index()
     unprocessed_df = unprocessed_df.merge(mean_df, on=['date'], suffixes=('Cycle', 'Daily'))
@@ -101,6 +112,8 @@ def create_features(unprocessed_df: pd.DataFrame) -> pd.DataFrame:
             'gt',
             'cycle',
             'capacity (Ah)',
+            'soh',
+            'rul',
             ]]
     
     return processed_df
@@ -140,7 +153,7 @@ def main():
     args=parser.parse_args()
     
     unprocessed_df = create_df(args.paths)
-    processed_df = create_features(unprocessed_df)
+    processed_df = create_features(unprocessed_df, args.rul)
     save_csv(df=processed_df,
              save_path=args.save_path,
              file_name=args.file_name
