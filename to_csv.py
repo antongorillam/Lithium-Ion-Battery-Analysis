@@ -6,11 +6,12 @@ import numpy as np
 from typing import List
 from scipy import io
 
-parser = argparse.ArgumentParser()
+parser = argparse.ArgumentParser(description='Lol')
 parser.add_argument('-p','--paths', nargs='+', help='Paths to the .m files to be converted', required=True, type=str)
 parser.add_argument('--save_path', help='The folder to save the processed .csv file', default=None, type=str)
 parser.add_argument('--file_name', help='The file name of the new .csv file', default=None, type=str)
 parser.add_argument('--rul', help='The SoH where we deem the end-of-life of the battery (0-100)', default=None, type=int) # Refractor this
+parser.add_argument('-q', '--query', nargs='+', help='', default=None, type=str)
 
 def create_df(paths: List[str]) -> pd.DataFrame:
     """
@@ -45,6 +46,8 @@ def create_features(unprocessed_df: pd.DataFrame, rul: int) -> pd.DataFrame:
     
     Args:
         unprocessed_df (pd.DataFrame): The unprocessed DataFrame to be processed.
+        rul: ---
+        query: ---
     
     Returns:
         pd.DataFrame: The processed DataFrame with additional features.
@@ -147,12 +150,32 @@ def save_csv(df: pd.DataFrame, save_path: str, file_name: str) -> None:
     
     print(f'File sucessfully saved to "{full_path}"')
     return None
-    
+
+def filter_df(df: pd.DataFrame, query: List[str]) -> pd.DataFrame:
+    """
+    Filter the DataFrame based on a list of strings.
+
+    Args:
+        df (pd.DataFrame): The DataFrame to be filtered.
+        query (List[str]): The list of strings to filter the DataFrame.
+
+    Returns:
+        pd.DataFrame: The filtered DataFrame.
+
+    """
+
+    # Filter the df with certain types
+    if query is not None:
+        filtered_df = df.query('type in @query')
+        return filtered_df.reset_index()
+    else:
+        return df
 
 def main():
     args=parser.parse_args()
     
     unprocessed_df = create_df(args.paths)
+    unprocessed_df = filter_df(unprocessed_df, args.query)
     processed_df = create_features(unprocessed_df, args.rul)
     save_csv(df=processed_df,
              save_path=args.save_path,

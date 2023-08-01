@@ -14,7 +14,10 @@
             "args": [
                 "-p", "battery datasets/1.Battery_Uniform_Distribution_Charge_Discharge_DataSet_2Post/data/Matlab/RW10.mat",
                 "--file_name", "lol",
-                "--save_path", "processed_datasets"],
+                "--save_path", "processed_datasets",
+                "--rul", "70",
+                "-q", "D", "C"
+            ],
             "justMyCode": true,
 
         }
