@@ -13,7 +13,7 @@ parser.add_argument('--file_name', help='The file name of the new .csv file', de
 parser.add_argument('--rul', help='The SoH where we deem the end-of-life of the battery (0-100)', default=None, type=int) # Refractor this
 parser.add_argument('-q', '--query', nargs='+', help='', default=None, type=str)
 
-def create_df(paths: List[str]) -> pd.DataFrame:
+def create_df(paths: List[str]) -> List[pd.DataFrame]:
     """
     Read in a list of MATLAB files and create a Pandas DataFrame.
 
@@ -22,6 +22,9 @@ def create_df(paths: List[str]) -> pd.DataFrame:
 
     Returns:
         pd.DataFrame: A DataFrame containing the data from all the files.
+
+    Example:
+        to_csv.py -p battery\ datasets/1.Battery_Uniform_Distribution_Charge_Discharge_DataSet_2Post/data/Matlab/RW10.mat --save_path processed_datasets --rul 70 -q D
     """
 
     dfs = []
@@ -38,7 +41,7 @@ def create_df(paths: List[str]) -> pd.DataFrame:
         df['dataset'] = battery_name 
         dfs.append(df)
 
-    return pd.concat(dfs, ignore_index=True)
+    return dfs
 
 def create_features(unprocessed_df: pd.DataFrame, rul: int) -> pd.DataFrame:
     """
@@ -58,6 +61,7 @@ def create_features(unprocessed_df: pd.DataFrame, rul: int) -> pd.DataFrame:
     # Extract reference discharge data and compute capacity
     df_ref = unprocessed_df.query('comment=="reference discharge"')
     df_ref['df_ref '] = pd.to_datetime(df_ref['date'], format=format_string, errors='coerce')
+    df_ref['capacity (Ah)'] = 0.0
     df_ref['capacity (Ah)'] = [np.trapz(i, t) / 3600 for i, t in zip(df_ref['current'], df_ref['relativeTime'])] # compute the capacity in Ah
     df_ref['gt'] = True
 
@@ -69,8 +73,10 @@ def create_features(unprocessed_df: pd.DataFrame, rul: int) -> pd.DataFrame:
     unprocessed_df['current'] = unprocessed_df['current'].apply(lambda x: x if isinstance(x, np.ndarray) else np.array([x]))
     unprocessed_df['timeRange'] = unprocessed_df['relativeTime'].apply(lambda x: x[-1] if isinstance(x, np.ndarray) else x)
     unprocessed_df['avgTemperature'] = unprocessed_df['temperature'].apply(lambda x: np.mean(x))
+    unprocessed_df['varTemperatureCycle'] = unprocessed_df['temperature'].apply(lambda x: np.var(x))
     unprocessed_df['avgCurrent'] = unprocessed_df['current'].apply(lambda x: np.mean(x))
     unprocessed_df['avgVoltage'] = unprocessed_df['voltage'].apply(lambda x: np.mean(x))
+    unprocessed_df['varVoltage'] = unprocessed_df['voltage'].apply(lambda x: np.var(x))
     unprocessed_df['avgResistance'] = unprocessed_df['avgCurrent'] / unprocessed_df['avgVoltage']
     unprocessed_df['startVoltage'] = unprocessed_df['voltage'].apply(lambda x: x[0])
     unprocessed_df['terminalVoltage'] = unprocessed_df['voltage'].apply(lambda x: x[-1])
@@ -105,8 +111,10 @@ def create_features(unprocessed_df: pd.DataFrame, rul: int) -> pd.DataFrame:
             'endTime',
             'timeRange',
             'avgTemperatureCycle',
-            'avgTemperatureDaily', 
+            'avgTemperatureDaily',
+            'varTemperatureCycle',
             'avgVoltage',
+            'varVoltage',
             'avgCurrent',
             'avgResistance',
             'startVoltage',
@@ -173,15 +181,15 @@ def filter_df(df: pd.DataFrame, query: List[str]) -> pd.DataFrame:
         return df
 
 def main():
+
     args=parser.parse_args()
-    
-    unprocessed_df = create_df(args.paths)
-    unprocessed_df = filter_df(unprocessed_df, args.query)
-    processed_df = create_features(unprocessed_df, args.rul)
+    unprocessed_dfs = create_df(args.paths)
+    unprocessed_dfs = [filter_df(df, args.query) for df in unprocessed_dfs]
+    processed_dfs = [create_features(df, args.rul) for df in unprocessed_dfs]
+    processed_df = pd.concat(processed_dfs, ignore_index=False)    
     save_csv(df=processed_df,
              save_path=args.save_path,
-             file_name=args.file_name
-             )
+             file_name=args.file_name)
 
 if __name__ == '__main__':
     main()
