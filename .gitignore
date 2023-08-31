@@ -1,2 +1,5 @@
 battery datasets/
 processed_datasets/
+plots/
+.vscode/settings.json
+.ipynb_checkpoints/*
