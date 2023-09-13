@@ -42,7 +42,9 @@
                     "battery datasets/7_RW_Skewed_Low_Room_Temp_DataSet_2Post/data/Matlab/RW15.mat",
                     "battery datasets/7_RW_Skewed_Low_Room_Temp_DataSet_2Post/data/Matlab/RW16.mat",
                     "--save_path", "processed_datasets",
-                "-q", "D",
+                "-q", "C",
+                "--make_monotonic",
+                "--interpolation_method", "linear",
             ],
             "justMyCode": true,
 
