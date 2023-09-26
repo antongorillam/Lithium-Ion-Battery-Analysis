@@ -124,3 +124,26 @@ The numbers of cycles for each battery is shown in the table below. The mean and
 | RW7            |          1268 |                1.49843   |               2.40238   |                149 |       0.117508   |
 | RW8            |          1240 |                1.53637   |               3.88119   |                143 |       0.115323   |
 | RW9            |         20506 |                0.0723593 |               0.106216  |                146 |       0.00711987 |
+
+### charge_feature_analysis.ipynb
+
+The main purpose of this notebook is used to analyze the charge features of the dataset to determine what features are useful for us. 
+
+This notebook can roughly be divided into following parts:
+
+- Load the full dataset to get a general idea of the dataset
+- Create a correlational matrix to see the correlation between features. More specifically, we want to see the correlation between charge features and the target variable, SOH.
+- Create a scatter plot to see the relationship between charge features to confirm the correlation matrix. Since SOH degrades with time, any useful feature is also expected to have some kind of clear (upwards or downward) trend with time.
+
+## Correlation Matrix and top-20 features
+
+![correlation_matrix](readme_imgs/correlation_matrix.png)
+
+![top_20_features](readme_imgs/top_20_features.png)
+
+To validate that these features actually works, we can plot the features against the SOH. The following plots shows the 3 of the top features. And as shown, there seems to be a clear trend between the features and the SOH.
+
+
+![skewCurrent](readme_imgs/skewness_current.png)
+![varCurrent](readme_imgs/var_current.png)
+![avgVoltage](readme_imgs/avg_voltage.png)
