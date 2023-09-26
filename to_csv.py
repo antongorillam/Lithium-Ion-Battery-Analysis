@@ -3,19 +3,24 @@ import argparse
 import warnings
 import pandas as pd
 import numpy as np
+import json
 
 from tqdm import tqdm # for progress bar
 from typing import List
 from scipy import io
 
+JSON_PATH = "anomaly_cycles.json"
+
 # Ignore the specific warning
 warnings.filterwarnings("ignore")
 
-parser = argparse.ArgumentParser(description='Lol')
+parser = argparse.ArgumentParser(description='Convert .mat files to .csv files and extract features.')
 parser.add_argument('-p','--paths', nargs='+', help='Paths to the .m files to be converted', required=True, type=str)
 parser.add_argument('--save_path', help='The folder to save the processed .csv file', default=None, type=str)
 parser.add_argument('--file_name', help='The file name of the new .csv file', default=None, type=str)
 parser.add_argument('-q', '--query', nargs='+', help='', default=None, type=str)
+parser.add_argument('--make_monotonic', help='Whether to make the soh column monotonic', action='store_true')
+parser.add_argument('--interpolation_method', help='The method to be used for interpolation', default='linear', type=str)
 
 def create_df(paths: List[str]) -> List[pd.DataFrame]:
     """
@@ -47,7 +52,25 @@ def create_df(paths: List[str]) -> List[pd.DataFrame]:
 
     return dfs
 
-def create_features(unprocessed_df: pd.DataFrame) -> pd.DataFrame:
+def compute_stats(df: pd.DataFrame, column: str) -> pd.DataFrame:
+    """
+    This function takes a DataFrame and computes the statistics of a column.
+    args:
+        df (pd.DataFrame): The DataFrame to be processed.
+        column (str): The column to compute the statistics for.
+    returns:
+        pd.DataFrame: The processed DataFrame.
+    """
+    upper_column = column[0].upper() + column[1:]
+    df[f'avg{upper_column}'] = df[column].apply(lambda x: np.mean(x))
+    df[f'var{upper_column}'] = df[column].apply(lambda x: np.var(x))
+    df[f'max{upper_column}'] = df[column].apply(lambda x: np.max(x))
+    df[f'min{upper_column}'] = df[column].apply(lambda x: np.min(x))
+    df[f'kurtosis{upper_column}'] = df[column].apply(lambda x: pd.Series(x).kurtosis(skipna=True))
+    df[f'skewness{upper_column}'] = df[column].apply(lambda x: pd.Series(x).skew(skipna=True))
+    return df
+
+def create_features(unprocessed_df: pd, query: list[str]) -> pd.DataFrame:
     """
     This function takes an unprocessed DataFrame and returns a processed DataFrame with additional features.
     
@@ -66,8 +89,23 @@ def create_features(unprocessed_df: pd.DataFrame) -> pd.DataFrame:
     df_ref['df_ref '] = pd.to_datetime(df_ref['date'], format=format_string, errors='coerce')
     df_ref['capacity (Ah)'] = 0.0
     df_ref['capacity (Ah)'] = [np.trapz(i, t) / 3600 for i, t in zip(df_ref['current'], df_ref['relativeTime'])] # compute the capacity in Ah
-    df_ref['gt'] = True
 
+    # If the discharge cycle is not suppose to be here
+    if 'D' not in query:
+        df_ref_temp = unprocessed_df.query('comment=="reference charge"')
+        df_ref_temp['capacity (Ah)'] = np.nan
+        # loop over df_ref and df_ref_temp (which are the same lenght)
+        # and replace df_ref_temp['capacity'] woth df_ref['capacity']
+        for i in range(len(df_ref)):
+            df_ref_temp['capacity (Ah)'].iloc[i] = df_ref['capacity (Ah)'].iloc[i] 
+
+        # Assert that df_ref_temp['capacity (Ah)'] does not contain nan values
+        assert not df_ref_temp['capacity (Ah)'].isna().any(), 'df_ref_temp["capacity (Ah)"] contains nan values'
+        df_ref = df_ref_temp
+        # Remove the type D from the unprocessed_df
+        unprocessed_df = unprocessed_df.query('type!="D"')
+
+    df_ref['gt'] = True
 
     # Process unprocessed_df
     unprocessed_df['dateTime'] = pd.to_datetime(unprocessed_df['date'], format=format_string, errors='coerce')
@@ -79,6 +117,7 @@ def create_features(unprocessed_df: pd.DataFrame) -> pd.DataFrame:
     unprocessed_df['resistance'] = unprocessed_df['voltage'] / unprocessed_df['current']
     unprocessed_df['resistance'] = unprocessed_df['resistance'].apply(lambda x: x if isinstance(x, np.ndarray) else np.array([x]))
 
+    test_df = compute_stats(unprocessed_df, 'temperature')
     unprocessed_df['avgTemperature'] = unprocessed_df['temperature'].apply(lambda x: np.mean(x))
     unprocessed_df['varTemperatureCycle'] = unprocessed_df['temperature'].apply(lambda x: np.var(x))
     unprocessed_df['maxTemperatureCycle'] = unprocessed_df['temperature'].apply(lambda x: np.max(x))
@@ -196,10 +235,48 @@ def create_features(unprocessed_df: pd.DataFrame) -> pd.DataFrame:
 
     return processed_df
 
+def to_monotonic_dec(serie: pd.Series):
+    """
+    This function takes a Pandas Series and returns a Pandas Series that is monotonic decreasing.
+    args:
+        serie (pd.Series): The Pandas Series to be made monotonic decreasing.
+    returns:
+        pd.Series: The monotonic decreasing Pandas Series.
+    """
+    return serie[serie <= serie.cummin()]
+
+def interpolate_df(df: pd.DataFrame, method='pchip', make_monotonic=False) -> pd.DataFrame:
+    """
+    This function takes a DataFrame and interpolates the soh column for each unique battery.
+    args:
+        df (pd.DataFrame): The DataFrame to be interpolated.
+        method (str): The method to be used for interpolation. Default is 'linear'.
+        make_monotonic (bool): Whether to make the soh column monotonic. Default is False.
+    returns:
+        pd.DataFrame: The interpolated DataFrame.
+    """
+    # Assert that there is only one type of battery in the set
+    assert len(df['battery_name'].unique()) == 1, 'There is more than one type of battery in the set'
+    
+    df_temp = df.query('gt==True')
+
+    # A bit hard-coded for now, but this removes some anomaly cycles
+    df_temp = remove_anomaly_cycles(df_temp)
+    
+    # Make soh column monotonic decreasing
+    if make_monotonic:
+        df_temp['soh'] = to_monotonic_dec(df_temp['soh'])
+        # Replace the soh column in the original dataframe
+        df['soh_interpolated'] = df_temp['soh']
+
+    df['soh_interpolated'] = df['soh_interpolated'].interpolate(method=method, limit_area='inside')
+    df = df.dropna(subset=['soh_interpolated']) # Drop nan values
+    return df
+
 def save_csv(df: pd.DataFrame, save_path: str, file_name: str) -> None:
     """
     This function saves a Pandas DataFrame as a CSV file with the specified file name at the specified file path.
-    If file_name is None, the function gets the unique names of the columns of df['battery_name'] and appends them into a string,
+    If file_name is None, the freunction gets the unique names of the columns of df['battery_name'] and appends them into a string,
     separated with "_" as the file_name.
     
     args:
@@ -238,28 +315,58 @@ def filter_df(df: pd.DataFrame, query: List[str]) -> pd.DataFrame:
         pd.DataFrame: The filtered DataFrame.
 
     """
-
     # Filter the df with certain types
     if query is not None:
+        query = query if 'D' in query else query + ['D'] # Add 'D' to the query if it is not there
         filtered_df = df.query('type in @query')
         return filtered_df.reset_index()
     else:
         return df
 
+def remove_anomaly_cycles(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    This function takes a DataFrame and removes the cycles that are marked as anomaly in the json file.
+    args:
+        df (pd.DataFrame): The DataFrame to be filtered.
+
+    returns:
+        pd.DataFrame: The filtered DataFrame.
+    """
+    with open(JSON_PATH, 'r') as f:
+        # Read the json file
+        anomaly_cycles = json.load(f)
+    
+    current_battery = df['battery_name'].unique()[0]
+    anomaly_cycles = anomaly_cycles[current_battery]
+
+    # Exclude anomaly cycles during interpolation
+    df = df[~df['cycle'].isin(anomaly_cycles)]
+    return df
+
 def main():
 
     args=parser.parse_args()
+    
     # Create a list of unprocessed DataFrames
     unprocessed_dfs = create_df(args.paths)
+    
     # Filter the DataFrames
     unprocessed_dfs = [filter_df(df, args.query) for df in tqdm(unprocessed_dfs, desc='Filtering data', ncols=75)]
+    
     # Process the DataFrames e.g. extract features
-    processed_dfs = [create_features(df) for df in tqdm(unprocessed_dfs, desc='Processing data', ncols=75)]
-    processed_df = pd.concat(processed_dfs, ignore_index=False)    
+    processed_dfs = [create_features(df, args.query) for df in tqdm(unprocessed_dfs, desc='Processing data', ncols=75)]
+    
+    # Interpolate the SoH column
+    processed_dfs = [interpolate_df(df, make_monotonic=args.make_monotonic, method=args.interpolation_method) for df in tqdm(processed_dfs, desc='Interpolating SoH', ncols=75)]
+    
+    # Combine the processed DataFrames into one DataFrame
+    processed_df = pd.concat(processed_dfs, ignore_index=False)
+    
     # Save the processed DataFrame as a CSV file
     save_csv(   df=processed_df,
                 save_path=args.save_path,
                 file_name=args.file_name)
+
     tqdm.write(f'Data saved at {args.save_path}')
 
 if __name__ == '__main__':
