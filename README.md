@@ -6,7 +6,7 @@ This github repo contains the code for the analysis of the lithium-ion battery d
 
 ## Environment
 
-The code uses `Anaconda 3` and `Python 3.10.11`. The dependencies can be found in the `environment.yml` file. To install the dependencies run the following command in the terminal:
+The code uses `Anaconda 2.5.0` and `Python 3.10.11`. The dependencies can be found in the `environment.yml` file. To install the dependencies run the following command in the terminal:
 
 ```bash
 conda env create -f environment.yml
